@@ -69,52 +69,55 @@ def check_role_limit(team_champs, proposed_champ):
 
 # 5. SIMULACIÓN DE PROBABILIDADES (Aquí conectas tu modelo)
 def calcular_metricas(blue_team, red_team, modelo):
-    # 1. Si el draft está vacío, empezamos en 50%-50% y 0 de impacto
+    # 1. Si el draft está vacío, empezamos en 50-50 sin cambios
     if not blue_team and not red_team:
+        st.session_state.last_winrate = 50.0
         return 50.0, 50.0, 0.0
     
-    # 2. CONSTRUIR EL VECTOR DE ENTRADA PARA EL MODELO
-    # Extraemos las filas de los campeones seleccionados de nuestra base de datos
+    # 2. Filtrar los campeones seleccionados en el DataFrame principal
     df_blue = df_champs[df_champs['name'].isin(blue_team)]
     df_red = df_champs[df_champs['name'].isin(red_team)]
     
-    # EJEMPLO A: Si tu modelo fue entrenado con la SUMA o PROMEDIO de las estadísticas de cada equipo:
-    # Columnas numéricas a promediar/sumar (Gold_Phys_Dmg, Gold_Mag_Dmg, etc.)
+    # Lista de tus columnas numéricas (todas las que empiezan con Gold_)
     features_numericas = [col for col in df_champs.columns if col.startswith('Gold_')]
     
-    # Calculamos el vector del equipo azul y rojo (llenamos con 0 si están vacíos al inicio del draft)
-    stats_blue = df_blue[features_numericas].sum().to_dict() if not df_blue.empty else {c: 0 for c in features_numericas}
-    stats_red = df_red[features_numericas].sum().to_dict() if not df_red.empty else {c: 0 for c in features_numericas}
+    # 3. Sumar o promediar los stats de los campeones actuales en cada bando
+    stats_blue = df_blue[features_numericas].sum().to_dict() if not df_blue.empty else {c: 0.0 for c in features_numericas}
+    stats_red = df_red[features_numericas].sum().to_dict() if not df_red.empty else {c: 0.0 for c in features_numericas}
     
-    # Creamos el diccionario final combinando ambos bandos con el prefijo correspondiente
+    # 4. Construir el diccionario con el formato exacto de tu modelo
+    # NOTA: Cambia los prefijos 'Blue_' y 'Red_' por los nombres exactos que usaste al entrenar
     input_data = {}
     for col in features_numericas:
         input_data[f"Blue_{col}"] = stats_blue[col]
         input_data[f"Red_{col}"] = stats_red[col]
         
-    # Convertimos a DataFrame de una sola fila (lo que espera sklearn)
+    # Convertimos a un DataFrame de una sola fila
     X_input = pd.DataFrame([input_data])
     
-    # Asegúrate de que X_input tenga el mismo orden de columnas con el que entrenaste el modelo.
-    # Si usaste columnas categóricas (como main_role con One-Hot Encoding), deberás agregarlas aquí también.
+    # ⚠️ IMPORTANTE: XGBoost exige que las columnas estén en el orden EXACTO de entrenamiento.
+    # Si tienes guardada la lista de columnas en una variable o lista, reordénalas aquí:
+    # columnas_entrenamiento = [...] 
+    # X_input = X_input[columnas_entrenamiento]
     
-    # 3. PREDICCIÓN DEL WINRATE
+    # 5. Predicción real con XGBoost
     try:
-        # predict_proba devuelve [[prob_perder, prob_ganar]] del equipo azul
+        # predict_proba nos devuelve [[prob_derrota, prob_victoria]]
         probabilidades = modelo.predict_proba(X_input)[0]
-        winrate_blue = round(probabilidades[1] * 100, 1) # Probabilidad de victoria de Blue
-        winrate_red = round(100 - winrate_blue, 1)
+        
+        # XGBoost suele asignar la clase 1 a la victoria del equipo Azul (o del equipo local)
+        winrate_blue = round(float(probabilidades[1]) * 100, 1)
+        winrate_red = round(100.0 - winrate_blue, 1)
     except Exception as e:
-        # En caso de que falten columnas o el modelo falle mientras el draft esté incompleto
+        # Si da error por falta de columnas o nombres incorrectos, se puede imprimir en consola para debuggear
+        print(f"Error en la predicción: {e}")
         winrate_blue, winrate_red = 50.0, 50.0
 
-    # 4. CALCULAR EL VALOR AGREGADO DEL ÚLTIMO PICK
-    # Evaluamos cuánto cambió el winrate con respecto al turno anterior
+    # 6. Calcular el impacto/valor agregado del último movimiento
     if "last_winrate" not in st.session_state:
         st.session_state.last_winrate = 50.0
         
-    # El valor agregado es la diferencia del winrate actual con el del paso anterior
-    # Si el último turno fue del equipo Azul, nos interesa cuánto subió para Blue. Si fue Red, cuánto subió para Red.
+    # El valor agregado evalúa cuánto alteró el pick a la probabilidad del equipo azul
     valor_agregado = round(winrate_blue - st.session_state.last_winrate, 2)
     st.session_state.last_winrate = winrate_blue
     
@@ -162,9 +165,7 @@ with col_status:
                 equipo_actual = current_pick_info['equipo']
                 team_list = st.session_state.blue_team if equipo_actual == "Blue" else st.session_state.red_team
                 
-                # Validar restricción de máximo 2 del mismo rol
                 if check_role_limit(team_list, seleccion):
-                    # Guardar selección
                     if equipo_actual == "Blue":
                         st.session_state.blue_team.append(seleccion)
                     else:
@@ -173,9 +174,9 @@ with col_status:
                     st.session_state.picked_champions.add(seleccion)
                     st.session_state.current_step += 1
                     
-                    # Mostrar el impacto del campeón recién pickeado
-                    st.success(f"{seleccion} agregará un {val_agregado}% de probabilidad de victoria al equipo {equipo_actual}")
-                    st.button("Continuar al siguiente turno") # Forzar recarga limpia
+                    # Forzamos a Streamlit a volver a ejecutar el script 
+                    # de modo que calcule las métricas del nuevo estado de inmediato
+                    st.rerun()
                 else:
                     st.error(f"❌ No puedes elegir a {seleccion}. El equipo {equipo_actual} ya tiene el límite máximo (2) de ese rol.")
     else:
