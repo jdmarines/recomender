@@ -62,13 +62,9 @@ if st.sidebar.button("Reiniciar Draft"):
 
 # 4. FUNCIONES DE VALIDACIÓN AUXILIARES
 def check_role_limit(team_champs, proposed_champ):
-    # Obtenemos el main_role del campeón propuesto
+    # Corrección: usar 'name' y 'main_role'
     proposed_role = df_champs[df_champs['name'] == proposed_champ]['main_role'].values[0]
-    
-    # Filtramos los roles de los campeones que ya están en el equipo
     roles_in_team = df_champs[df_champs['name'].isin(team_champs)]['main_role'].tolist()
-    
-    # Validamos que no haya ya 2 con ese mismo rol
     return roles_in_team.count(proposed_role) < 2
 
 # 5. SIMULACIÓN DE PROBABILIDADES (Aquí conectas tu modelo)
@@ -130,13 +126,15 @@ col_blue, col_status, col_red = st.columns([1, 1.5, 1])
 with col_blue:
     st.header("🔵 Equipo Azul")
     for i, champ in enumerate(st.session_state.blue_team):
-        rol = df_champs[df_champs['campeon'] == champ]['rol'].values[0]
+        # Corrección: usar 'name' y 'main_role'
+        rol = df_champs[df_champs['name'] == champ]['main_role'].values[0]
         st.subheader(f"{i+1}. {champ} ({rol})")
 
 with col_red:
     st.header("🔴 Equipo Rojo")
     for i, champ in enumerate(st.session_state.red_team):
-        rol = df_champs[df_champs['campeon'] == champ]['rol'].values[0]
+        # Corrección: usar 'name' y 'main_role'
+        rol = df_champs[df_champs['name'] == champ]['main_role'].values[0]
         st.subheader(f"{i+1}. {champ} ({rol})")
 
 # Control central del flujo
@@ -153,7 +151,7 @@ with col_status:
         current_pick_info = DRAFT_ORDER[st.session_state.current_step]
         st.info(f"Turno actual: **{current_pick_info['label']}**")
         
-        # Filtrar campeones ya seleccionados usando la columna 'name'
+        # Corrección: cambiar 'campeon' por 'name'
         disponibles = df_champs[~df_champs['name'].isin(st.session_state.picked_champions)]['name'].tolist()
         
         # Input de selección
