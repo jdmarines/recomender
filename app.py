@@ -15,18 +15,13 @@ def load_models():
     return model_low, model_apex
 
 @st.cache_data
+@st.cache_data
 def load_champ_data():
-    # Simulación de datos. Tu CSV debe tener el nombre del campeón y su rol principal
-    # Columnas: 'campeon', 'rol' (Top, Jungle, Mid, ADC, Support)
-    try:
-        df = pd.read_csv("datos_campeones.csv")
-    except FileNotFoundError:
-        # Dataframe de respaldo para pruebas
-        df = pd.DataFrame({
-            'campeon': ['Aatrox', 'Ahri', 'Ashe', 'Braum', 'Darius', 'Lee Sin', 'Jinx', 'Thresh', 'Orianna', 'Vayne'],
-            'rol': ['Top', 'Mid', 'ADC', 'Support', 'Top', 'Jungle', 'ADC', 'Support', 'Mid', 'ADC']
-        })
+    # Asegúrate de que el nombre del archivo coincida con tu archivo real
+    df = pd.read_csv("datos_campeones.csv")
     return df
+
+df_champs = load_champ_data()
 
 model_low, model_apex = load_models()
 df_champs = load_champ_data()
@@ -67,32 +62,67 @@ if st.sidebar.button("Reiniciar Draft"):
 
 # 4. FUNCIONES DE VALIDACIÓN AUXILIARES
 def check_role_limit(team_champs, proposed_champ):
-    proposed_role = df_champs[df_champs['campeon'] == proposed_champ]['rol'].values[0]
-    roles_in_team = df_champs[df_champs['campeon'].isin(team_champs)]['rol'].tolist()
+    # Obtenemos el main_role del campeón propuesto
+    proposed_role = df_champs[df_champs['name'] == proposed_champ]['main_role'].values[0]
+    
+    # Filtramos los roles de los campeones que ya están en el equipo
+    roles_in_team = df_champs[df_champs['name'].isin(team_champs)]['main_role'].tolist()
+    
+    # Validamos que no haya ya 2 con ese mismo rol
     return roles_in_team.count(proposed_role) < 2
 
 # 5. SIMULACIÓN DE PROBABILIDADES (Aquí conectas tu modelo)
 def calcular_metricas(blue_team, red_team, modelo):
-    """
-    Modifica esta función según cómo reciba los datos tu modelo .joblib.
-    Generalmente requiere un vector One-Hot Encoding de los 10 campeones.
-    """
-    # Placeholder: Simulación de probabilidad basada en el número de campeones
-    # Replázalo con: prediccion = modelo.predict_proba(X)
-    base_winrate = 50.0
-    blue_impact = len(blue_team) * 1.2  # Simulación de valor agregado
-    red_impact = len(red_team) * 1.1
+    # 1. Si el draft está vacío, empezamos en 50%-50% y 0 de impacto
+    if not blue_team and not red_team:
+        return 50.0, 50.0, 0.0
     
-    winrate_blue = clamp(base_winrate + blue_impact - red_impact, 10, 90)
-    winrate_red = 100 - winrate_blue
+    # 2. CONSTRUIR EL VECTOR DE ENTRADA PARA EL MODELO
+    # Extraemos las filas de los campeones seleccionados de nuestra base de datos
+    df_blue = df_champs[df_champs['name'].isin(blue_team)]
+    df_red = df_champs[df_champs['name'].isin(red_team)]
     
-    # Simulación del valor individual que aporta el último campeón seleccionado
-    valor_agregado = round(np.random.uniform(-3.5, 4.5), 2) 
+    # EJEMPLO A: Si tu modelo fue entrenado con la SUMA o PROMEDIO de las estadísticas de cada equipo:
+    # Columnas numéricas a promediar/sumar (Gold_Phys_Dmg, Gold_Mag_Dmg, etc.)
+    features_numericas = [col for col in df_champs.columns if col.startswith('Gold_')]
     
-    return round(winrate_blue, 1), round(winrate_red, 1), valor_agregado
+    # Calculamos el vector del equipo azul y rojo (llenamos con 0 si están vacíos al inicio del draft)
+    stats_blue = df_blue[features_numericas].sum().to_dict() if not df_blue.empty else {c: 0 for c in features_numericas}
+    stats_red = df_red[features_numericas].sum().to_dict() if not df_red.empty else {c: 0 for c in features_numericas}
+    
+    # Creamos el diccionario final combinando ambos bandos con el prefijo correspondiente
+    input_data = {}
+    for col in features_numericas:
+        input_data[f"Blue_{col}"] = stats_blue[col]
+        input_data[f"Red_{col}"] = stats_red[col]
+        
+    # Convertimos a DataFrame de una sola fila (lo que espera sklearn)
+    X_input = pd.DataFrame([input_data])
+    
+    # Asegúrate de que X_input tenga el mismo orden de columnas con el que entrenaste el modelo.
+    # Si usaste columnas categóricas (como main_role con One-Hot Encoding), deberás agregarlas aquí también.
+    
+    # 3. PREDICCIÓN DEL WINRATE
+    try:
+        # predict_proba devuelve [[prob_perder, prob_ganar]] del equipo azul
+        probabilidades = modelo.predict_proba(X_input)[0]
+        winrate_blue = round(probabilidades[1] * 100, 1) # Probabilidad de victoria de Blue
+        winrate_red = round(100 - winrate_blue, 1)
+    except Exception as e:
+        # En caso de que falten columnas o el modelo falle mientras el draft esté incompleto
+        winrate_blue, winrate_red = 50.0, 50.0
 
-def clamp(n, minn, maxn):
-    return max(min(n, maxn), minn)
+    # 4. CALCULAR EL VALOR AGREGADO DEL ÚLTIMO PICK
+    # Evaluamos cuánto cambió el winrate con respecto al turno anterior
+    if "last_winrate" not in st.session_state:
+        st.session_state.last_winrate = 50.0
+        
+    # El valor agregado es la diferencia del winrate actual con el del paso anterior
+    # Si el último turno fue del equipo Azul, nos interesa cuánto subió para Blue. Si fue Red, cuánto subió para Red.
+    valor_agregado = round(winrate_blue - st.session_state.last_winrate, 2)
+    st.session_state.last_winrate = winrate_blue
+    
+    return winrate_blue, winrate_red, valor_agregado
 
 # 6. INTERFAZ GRÁFICA DEL DRAFT
 col_blue, col_status, col_red = st.columns([1, 1.5, 1])
@@ -123,12 +153,12 @@ with col_status:
         current_pick_info = DRAFT_ORDER[st.session_state.current_step]
         st.info(f"Turno actual: **{current_pick_info['label']}**")
         
-        # Filtrar campeones ya seleccionados
-        disponibles = df_champs[~df_champs['campeon'].isin(st.session_state.picked_champions)]['campeon'].tolist()
+        # Filtrar campeones ya seleccionados usando la columna 'name'
+        disponibles = df_champs[~df_champs['name'].isin(st.session_state.picked_champions)]['name'].tolist()
         
         # Input de selección
         seleccion = st.selectbox("Selecciona un Campeón:", ["-- Selecciona --"] + disponibles)
-        
+                
         if st.button("Confirmar Selección"):
             if seleccion != "-- Selecciona --":
                 equipo_actual = current_pick_info['equipo']
