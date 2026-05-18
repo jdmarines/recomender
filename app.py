@@ -9,9 +9,15 @@ st.title("🏆 LoL Sequential Draft Picker & Predictor")
 
 @st.cache_resource
 def load_models():
-    # Reemplaza con las rutas correctas si están en carpetas
-    model_low = joblib.load("best_model_lowtier.joblib")
-    model_apex = joblib.load("best_model_apex.joblib")
+    # 1. Cargamos el diccionario completo desde el archivo
+    data_low = joblib.load("modelo_low_elo.joblib")
+    data_apex = joblib.load("modelo_apex.joblib")
+    
+    # 2. Extraemos el objeto que está guardado en la llave 'pipeline'
+    # Usamos .get() por seguridad en caso de que alguna llave varíe
+    model_low = data_low.get("pipeline")
+    model_apex = data_apex.get("pipeline")
+    
     return model_low, model_apex
 
 @st.cache_data
@@ -92,14 +98,17 @@ def calcular_metricas(blue_team, red_team, modelo):
     X_input = pd.DataFrame([input_data])
     
     # --- BLOQUE DE DIAGNÓSTICO ---
-    # Intentamos ver cuáles son las columnas reales que tu XGBoost espera
+# Dentro de tu función calcular_metricas, busca el bloque de diagnóstico y déjalo así:
     try:
-        # En muchos modelos de XGBoost, los nombres de columnas se guardan en feature_names
-        columnas_modelo = modelo.feature_names_in_
-        # Reordenamos nuestro input para que coincida exactamente con lo que el modelo pide
+        # Volvemos a cargar el diccionario para leer las columnas originales
+        # Nota: 'modelo' aquí ya es el pipeline debido al cambio en load_models()
+        # Si tienes guardada la info original, extraemos los nombres exactos:
+        data_raw = joblib.load("modelo_apex.joblib" if elo_side == "Apex (High Elo)" else "modelo_low_elo.joblib")
+        columnas_modelo = data_raw.get("feature_names")
+        
+        # Reordenamos nuestro DataFrame input con el orden exacto de entrenamiento
         X_input = X_input[columnas_modelo]
-    except AttributeError:
-        # Si el modelo no tiene guardados los nombres de las columnas en esa propiedad
+    except Exception as e:
         pass
     # -----------------------------
     
