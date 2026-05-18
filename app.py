@@ -69,55 +69,60 @@ def check_role_limit(team_champs, proposed_champ):
 
 # 5. SIMULACIÓN DE PROBABILIDADES (Aquí conectas tu modelo)
 def calcular_metricas(blue_team, red_team, modelo):
-    # 1. Si el draft está vacío, empezamos en 50-50 sin cambios
+    # 1. Si no hay picks, el draft está en blanco
     if not blue_team and not red_team:
         st.session_state.last_winrate = 50.0
         return 50.0, 50.0, 0.0
     
-    # 2. Filtrar los campeones seleccionados en el DataFrame principal
+    # 2. Filtrar campeones
     df_blue = df_champs[df_champs['name'].isin(blue_team)]
     df_red = df_champs[df_champs['name'].isin(red_team)]
     
-    # Lista de tus columnas numéricas (todas las que empiezan con Gold_)
     features_numericas = [col for col in df_champs.columns if col.startswith('Gold_')]
     
-    # 3. Sumar o promediar los stats de los campeones actuales en cada bando
     stats_blue = df_blue[features_numericas].sum().to_dict() if not df_blue.empty else {c: 0.0 for c in features_numericas}
     stats_red = df_red[features_numericas].sum().to_dict() if not df_red.empty else {c: 0.0 for c in features_numericas}
     
-    # 4. Construir el diccionario con el formato exacto de tu modelo
-    # NOTA: Cambia los prefijos 'Blue_' y 'Red_' por los nombres exactos que usaste al entrenar
+    # 3. Construir diccionario
     input_data = {}
     for col in features_numericas:
         input_data[f"Blue_{col}"] = stats_blue[col]
         input_data[f"Red_{col}"] = stats_red[col]
         
-    # Convertimos a un DataFrame de una sola fila
     X_input = pd.DataFrame([input_data])
     
-    # ⚠️ IMPORTANTE: XGBoost exige que las columnas estén en el orden EXACTO de entrenamiento.
-    # Si tienes guardada la lista de columnas en una variable o lista, reordénalas aquí:
-    # columnas_entrenamiento = [...] 
-    # X_input = X_input[columnas_entrenamiento]
-    
-    # 5. Predicción real con XGBoost
+    # --- BLOQUE DE DIAGNÓSTICO ---
+    # Intentamos ver cuáles son las columnas reales que tu XGBoost espera
     try:
-        # predict_proba nos devuelve [[prob_derrota, prob_victoria]]
+        # En muchos modelos de XGBoost, los nombres de columnas se guardan en feature_names
+        columnas_modelo = modelo.feature_names_in_
+        # Reordenamos nuestro input para que coincida exactamente con lo que el modelo pide
+        X_input = X_input[columnas_modelo]
+    except AttributeError:
+        # Si el modelo no tiene guardados los nombres de las columnas en esa propiedad
+        pass
+    # -----------------------------
+    
+    try:
+        # 4. Predicción real
         probabilidades = modelo.predict_proba(X_input)[0]
-        
-        # XGBoost suele asignar la clase 1 a la victoria del equipo Azul (o del equipo local)
         winrate_blue = round(float(probabilidades[1]) * 100, 1)
         winrate_red = round(100.0 - winrate_blue, 1)
     except Exception as e:
-        # Si da error por falta de columnas o nombres incorrectos, se puede imprimir en consola para debuggear
-        print(f"Error en la predicción: {e}")
+        # CAMBIO CLAVE: En lugar de ocultar el error, te lo mostramos en grande en Streamlit
+        st.error(f"⚠️ Error al intentar predecir con tu modelo XGBoost:")
+        st.code(str(e))
+        
+        # También te imprimimos en pantalla cómo construimos las columnas para que compares
+        st.warning("Columnas que la app le está enviando al modelo:")
+        st.write(list(X_input.columns))
+        
         winrate_blue, winrate_red = 50.0, 50.0
 
-    # 6. Calcular el impacto/valor agregado del último movimiento
+    # 5. Calcular valor agregado
     if "last_winrate" not in st.session_state:
         st.session_state.last_winrate = 50.0
         
-    # El valor agregado evalúa cuánto alteró el pick a la probabilidad del equipo azul
     valor_agregado = round(winrate_blue - st.session_state.last_winrate, 2)
     st.session_state.last_winrate = winrate_blue
     
