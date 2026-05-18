@@ -10,8 +10,8 @@ st.title("🏆 LoL Sequential Draft Picker & Predictor")
 @st.cache_resource
 def load_models():
     # 1. Cargamos el diccionario completo desde el archivo
-    data_low = joblib.load("modelo_low_elo.joblib")
-    data_apex = joblib.load("modelo_apex.joblib")
+    data_low = joblib.load("best_model_lowtier.joblib")
+    data_apex = joblib.load("best_model_apex.joblib")
     
     # 2. Extraemos el objeto que está guardado en la llave 'pipeline'
     # Usamos .get() por seguridad en caso de que alguna llave varíe
